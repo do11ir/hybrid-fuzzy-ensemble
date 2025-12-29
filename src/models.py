@@ -3,8 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .fuzzy import FuzzyVotingLayer
 
-# BaseNN1: عمق کم، ReLU, Dropout=0.2
+# ---------------- BaseNN1 ----------------
 class BaseNN1(nn.Module):
+    """Shallow NN, ReLU, Dropout 0.2"""
     def __init__(self, input_dim, hidden_dim=16):
         super(BaseNN1, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -16,10 +17,11 @@ class BaseNN1(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.dropout(x)
-        return torch.sigmoid(self.out(x))
+        return self.out(x)  # ⚠️ raw logits, no sigmoid
 
-# BaseNN2: عمق بیشتر، Tanh, Dropout=0.1
+# ---------------- BaseNN2 ----------------
 class BaseNN2(nn.Module):
+    """Deeper NN, Tanh, Dropout 0.1"""
     def __init__(self, input_dim, hidden_dim=32):
         super(BaseNN2, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -33,10 +35,11 @@ class BaseNN2(nn.Module):
         x = torch.tanh(self.fc2(x))
         x = torch.tanh(self.fc3(x))
         x = self.dropout(x)
-        return torch.sigmoid(self.out(x))
+        return self.out(x)  # ⚠️ raw logits, no sigmoid
 
-# Hybrid Ensemble با لایه فازی Voting
+# ---------------- Hybrid Ensemble ----------------
 class HybridEnsemble(nn.Module):
+    """Hybrid Ensemble with Fuzzy Voting"""
     def __init__(self, input_dim):
         super(HybridEnsemble, self).__init__()
         self.base1 = BaseNN1(input_dim)
@@ -45,7 +48,15 @@ class HybridEnsemble(nn.Module):
         self.final = nn.Linear(1, 1)
 
     def forward(self, x):
+        # Get logits from base networks
         out1 = self.base1(x)
         out2 = self.base2(x)
-        voted = self.voting(out1, out2)
-        return torch.sigmoid(self.final(voted))
+
+        # Convert logits to probabilities for fuzzy voting
+        prob1 = torch.sigmoid(out1)
+        prob2 = torch.sigmoid(out2)
+        voted = self.voting(prob1, prob2)
+
+        # Final linear layer → return raw logit for BCEWithLogitsLoss
+        final_logit = self.final(voted)
+        return final_logit  # ⚠️ raw logit

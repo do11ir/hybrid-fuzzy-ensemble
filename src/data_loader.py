@@ -1,43 +1,63 @@
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+
 
 class HeartDiseaseDataset(Dataset):
     def __init__(self, data, targets):
         self.data = torch.tensor(data, dtype=torch.float32)
-        self.targets = torch.tensor(targets, dtype=torch.float32).unsqueeze(1)
+        self.targets = torch.tensor(targets, dtype=torch.float32).view(-1, 1)
 
     def __len__(self):
-        return len(self.targets)
+        return self.targets.shape[0]
 
     def __getitem__(self, idx):
         return self.data[idx], self.targets[idx]
 
-def load_heart_data(file_path="data/raw/heart.csv", test_size=0.2, random_state=42, batch_size=32):
-    # بارگذاری دیتاست
+
+def load_heart_data(
+    file_path="data/raw/heart.csv",
+    train_idx=None,
+    val_idx=None,
+    batch_size=32
+):
+    if train_idx is None or val_idx is None:
+        raise ValueError("train_idx and val_idx must be provided for cross-validation")
+
+    # Load dataset
     df = pd.read_csv(file_path)
 
-    # متغیر هدف باینری (در این نسخه target از قبل باینری است، پس نیازی به تبدیل نیست)
-    y = df['target']
-    X = df.drop(columns=['target'])
+    # Explicit column handling (safer)
+    X = df.drop(columns=["target"]).to_numpy(dtype=float)
+    y = df["target"].to_numpy(dtype=float)
 
-    # استاندارد سازی ویژگی‌ها
+    # Index-based split (NO data leakage)
+    X_train, X_val = X[train_idx], X[val_idx]
+    y_train, y_val = y[train_idx], y[val_idx]
+
+    # Fit scaler ONLY on training data
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
 
-    # تقسیم داده‌ها
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_scaled, y, test_size=test_size, random_state=random_state, stratify=y
+    # Create datasets
+    train_dataset = HeartDiseaseDataset(X_train, y_train)
+    val_dataset = HeartDiseaseDataset(X_val, y_val)
+
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False
     )
 
-    # ساخت PyTorch Dataset
-    train_dataset = HeartDiseaseDataset(X_train, y_train.values)
-    val_dataset = HeartDiseaseDataset(X_val, y_val.values)
-
-    # ساخت DataLoader
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False
+    )
 
     return train_loader, val_loader
