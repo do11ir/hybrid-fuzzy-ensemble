@@ -6,7 +6,6 @@ from src.data_loader import load_heart_data
 import os
 import pandas as pd
 
-
 def train_model(
     data_path="data/raw/heart.csv",
     train_idx=None,
@@ -20,7 +19,6 @@ def train_model(
     if train_idx is None or val_idx is None:
         raise ValueError("train_idx and val_idx must be provided for cross-validation")
 
-    # Load data for THIS fold
     train_loader, val_loader = load_heart_data(
         file_path=data_path,
         train_idx=train_idx,
@@ -28,33 +26,27 @@ def train_model(
         batch_size=batch_size
     )
 
-    # ---------- CLASS WEIGHT FIX (CRITICAL) ----------
     df = pd.read_csv(data_path)
     y_train = df.iloc[train_idx]["target"].values
 
     n_pos = (y_train == 1).sum()
     n_neg = (y_train == 0).sum()
+    pos_weight = torch.tensor(n_neg / n_pos, dtype=torch.float32)
 
-    pos_weight = torch.tensor(
-        n_neg / n_pos,
-        dtype=torch.float32
-    )
-    # -----------------------------------------------
-
-    # Build model (NEW model per fold)
     model = HybridEnsemble(input_dim)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    # ⚠️ FIXED: weighted loss
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     best_val_loss = float("inf")
 
+    # ---- NEW: lists to store epoch-wise loss ----
+    train_losses = []
+    val_losses = []
+
     for epoch in range(epochs):
-        # ---------- TRAIN ----------
         model.train()
         train_loss = 0.0
 
@@ -71,6 +63,7 @@ def train_model(
             train_loss += loss.item() * X_batch.size(0)
 
         train_loss /= len(train_loader.dataset)
+        train_losses.append(train_loss)  # <--- store epoch loss
 
         # ---------- VALIDATE ----------
         model.eval()
@@ -95,6 +88,7 @@ def train_model(
                 total += y_batch.size(0)
 
         val_loss /= len(val_loader.dataset)
+        val_losses.append(val_loss)  # <--- store epoch loss
         val_acc = correct / total
 
         print(
@@ -109,4 +103,5 @@ def train_model(
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             torch.save(model.state_dict(), save_path)
 
-    return model, best_val_loss
+    # ---- return losses along with model ----
+    return model, best_val_loss, train_losses, val_losses
